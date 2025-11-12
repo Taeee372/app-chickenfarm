@@ -17,12 +17,32 @@ const HomeScreen = () => {
 
   // 실시간 환경 정보
   const [realtime, setRealtime] = useState(null)
-  
+
   // 통신 오류 상태
   const [connectionError, setConnectionError] = useState(false)
 
+  // 최초 로딩 완료 상태
+  const [isInitialLoadComplete, setIsInitialLoadComplete] = useState(false)
+
+  // 재시도 함수
+  const retryRequest = async (requestFunction, maxRetries = 30) => {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const result = await requestFunction()
+        return { success: true, data: result }
+      } catch (error) {
+        if (i < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 300))
+        }
+      }
+    }
+    return { success: false }
+  }
+
   // 날씨 데이터 가져오기
   useEffect(() => {
+    let failureCount = 0 // 연속 실패 횟수
+
     const getWeather = async () => {
       // 날씨 정보
       const response = await axios.get('https://api.openweathermap.org/data/2.5/weather', {
@@ -36,25 +56,46 @@ const HomeScreen = () => {
         .then((resp) => setWeather(resp.data))
     }
 
-    // 실시간 환경 정보
-    const getRealtimeData = async () => {
-      try {
-        const response = await axios.get('http://10.0.2.2:5000/api/realtime', {
+    // 실시간 환경 정보 (최초 실행용)
+    const getRealtimeDataInitial = async () => {
+      const result = await retryRequest(() =>
+        axios.get('http://192.168.30.240:5000/api/realtime', {
           timeout: 3000
         })
+      )
 
-        if (response.data.success) {
-          setRealtime(response.data.data)
-          setConnectionError(false) // 통신 성공
+      if (result.success && result.data.data.success) {
+        setRealtime(result.data.data.data)
+        setConnectionError(false) // 통신 성공
+        failureCount = 0 // 성공 시 실패 카운트 초기화
+      } else {
+        setConnectionError(true) // 통신 실패 - 최초에만 오류 메시지 표시
+      }
+      setIsInitialLoadComplete(true) // 최초 로딩 완료
+    }
+
+    // 실시간 환경 정보 (주기적 실행용)
+    const getRealtimeData = async () => {
+      const result = await retryRequest(() =>
+        axios.get('http://192.168.30.240:5000/api/realtime', {
+          timeout: 3000
+        })
+      )
+
+      if (result.success && result.data.data.success) {
+        setRealtime(result.data.data.data)
+        setConnectionError(false) // 통신 성공
+        failureCount = 0 // 성공 시 실패 카운트 초기화
+      } else {
+        failureCount++ // 실패 시 카운트 증가
+        if (failureCount >= 3) {
+          setConnectionError(true) // 3회 연속 실패 시 오류 메시지 표시
         }
-      } catch (error) {
-        // 에러는 UI로만 표시 (콘솔 로그 제거)
-        setConnectionError(true) // 통신 실패
       }
     }
 
     // 첫 실행
-    getRealtimeData()
+    getRealtimeDataInitial()
     getWeather()
 
     // 실시간 업데이트 (5초마다로 변경 - 더 안정적)
@@ -109,43 +150,48 @@ const HomeScreen = () => {
 
   // 환경 점수 계산 (0-100점)
   const calculateEnvScore = () => {
-    if (!realtime) return 0
-
+    // realtime이 null이거나 없어도 계산 실행
     let score = 100
 
-    const temp = realtime.temperature || 0
-    if (temp < 15 || temp > 25) {
-      score -= Math.abs(temp < 15 ? 15 - temp : temp - 25) * 2
+    const temp = realtime?.temperature || 0
+    if (temp !== 0) {
+      if (temp < 15 || temp > 25) {
+        score -= Math.abs(temp < 15 ? 15 - temp : temp - 25) * 2
+      }
     }
 
-    const humidity = realtime.humidity || 0
-    if (humidity < 40 || humidity > 60) {
-      score -= Math.abs(humidity < 40 ? 40 - humidity : humidity - 60) * 1.5
+    const humidity = realtime?.humidity || 0
+    if (humidity !== 0) {
+      if (humidity < 40 || humidity > 60) {
+        score -= Math.abs(humidity < 40 ? 40 - humidity : humidity - 60) * 1.5
+      }
     }
 
-    const co2 = realtime.co2 || 0
+    const co2 = realtime?.co2 || 0
     if (co2 > 800) {
       score -= (co2 - 800) / 20
     }
 
-    const co = realtime.co || 0
+    const co = realtime?.co || 0
     if (co > 10) {
       score -= (co - 10) * 2
     }
 
-    const nh3 = realtime.nh3 || 0
+    const nh3 = realtime?.nh3 || 0
     if (nh3 > 15) {
       score -= (nh3 - 15) * 2
     }
 
-    const no2 = realtime.no2 || 0
+    const no2 = realtime?.no2 || 0
     if (no2 > 20) {
       score -= (no2 - 20) * 1.5
     }
 
-    const lux = realtime.lux || 0
-    if (lux < 300 || lux > 800) {
-      score -= Math.abs(lux < 300 ? 300 - lux : lux - 800) / 10
+    const lux = realtime?.lux || 0
+    if (lux !== 0) {
+      if (lux < 300 || lux > 800) {
+        score -= Math.abs(lux < 300 ? 300 - lux : lux - 800) / 10
+      }
     }
 
     return Math.max(0, Math.min(100, Math.round(score)))
@@ -436,7 +482,7 @@ const styles = StyleSheet.create({
   description: {
     marginLeft: 15,
     color: 'white',
-    fontSize: 40,
+    fontSize: 18,
     fontWeight: '600'
   },
   else: {
