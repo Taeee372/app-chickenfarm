@@ -86,7 +86,7 @@ const signup = () => {
               <Button
                 title='회원가입'
                 onPress={signupBtn}
-                style={styles.signupButton}
+                variant='success'
               />
 
               <View style={styles.footer}>

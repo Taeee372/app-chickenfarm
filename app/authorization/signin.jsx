@@ -62,7 +62,8 @@ const signin = () => {
               <Button
                 title='로그인'
                 onPress={loginBtn}
-                style={styles.loginButton}
+                variant='success'
+                
               />
 
               <View style={styles.footer}>
